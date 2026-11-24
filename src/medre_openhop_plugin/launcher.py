@@ -60,7 +60,9 @@ def _settings(data: Path) -> bool:
 
 def _lock(data: Path) -> int:
     # The file remains in place across runs; replacing it would split the lock.
-    fd = os.open(data / ".medre-launch.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    fd = os.open(
+        data / ".medre-launch.lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600
+    )
     try:
         if not stat.S_ISREG(os.fstat(fd).st_mode):
             raise LaunchError("Plugin launch lock is not a regular file")
@@ -76,6 +78,12 @@ def _lock(data: Path) -> int:
 
 
 def _prepare(data: Path, environ: Mapping[str, str]) -> tuple[list[str], dict[str, str]]:
+    status = data / "runtime.json"
+    if status.exists() or status.is_symlink():
+        if _json_object(status).get("schema") != STATUS_SCHEMA:
+            raise LaunchError("Existing runtime.json is not a MEDRE status document")
+        # Retire the previous run even if new configuration is invalid.
+        status.unlink()
     live_status = _settings(data)
     home = data / "medre"
     if home.is_symlink():
@@ -88,13 +96,6 @@ def _prepare(data: Path, environ: Mapping[str, str]) -> tuple[list[str], dict[st
         raise LaunchError("Provision the private bridge YAML at data/medre/config.yaml first")
     if config.stat().st_mode & 0o077:
         raise LaunchError("Bridge YAML must not be group/world accessible (use chmod 600)")
-    status = data / "runtime.json"
-    if status.exists() or status.is_symlink():
-        if _json_object(status).get("schema") != STATUS_SCHEMA:
-            raise LaunchError("Existing runtime.json is not a MEDRE status document")
-        # Never expose an earlier run's observation as this process's status.
-        status.unlink()
-
     env = {key: value for key, value in environ.items() if not key.startswith("MEDRE_")}
     env["MEDRE_HOME"] = str(home)
     # -I excludes inherited PYTHONPATH/user site (notably the HA wrapper's
@@ -118,7 +119,10 @@ def main() -> int:
         print(f"MEDRE plugin configuration: {exc}", file=sys.stderr)
     except OSError:
         # Do not print paths, file contents or inherited environment values.
-        print("MEDRE plugin could not prepare its private data or launch MEDRE", file=sys.stderr)
+        print(
+            "MEDRE plugin could not prepare its private data or launch MEDRE",
+            file=sys.stderr,
+        )
     finally:
         if fd is not None:
             os.close(fd)

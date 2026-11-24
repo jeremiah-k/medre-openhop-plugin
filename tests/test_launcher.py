@@ -109,3 +109,12 @@ def test_main_execs_without_child_process(data, monkeypatch):
     assert calls[0][1][1:4] == ["-I", "-m", "medre"]
     # Failed exec must release the descriptor, without unlinking the lock file.
     os.close(launcher._lock(data))
+
+
+def test_failed_new_configuration_retires_previous_heartbeat(data):
+    status = data / "runtime.json"
+    status.write_text(json.dumps({"schema": launcher.STATUS_SCHEMA, "phase": "running"}))
+    (data / "medre/config.yaml").unlink()
+    with pytest.raises(launcher.LaunchError, match="Provision"):
+        launcher._prepare(data, {})
+    assert not status.exists()
