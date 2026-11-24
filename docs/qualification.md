@@ -20,3 +20,8 @@
 - Qualify aarch64 and amd64, Python versions, package resolution and read-only
   redaction. Do not publish catalogue entries or claim supported hardware until
   actual wheel-install and Docker/physical qualification pass.
+
+`python scripts/verify_wheel.py dist/*.whl` performs an isolated installed-wheel
+launcher smoke test using an explicitly identified MEDRE stand-in. It verifies
+entrypoint execution, PID retention, the launch lock and SIGTERM delivery; it
+does not install or qualify MEDRE or its SDK dependencies.
