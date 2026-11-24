@@ -17,8 +17,9 @@ the MEDRE hardware lab's openHop interoperability work passes.
    wheel source for reproducible installs; the plugin manager's wheel checksum
    does not lock transitive dependencies. Check Python >=3.11 and native SDK
    availability on the actual target (including ARM64).
-2. Install the wheel from openHop's Plugins dashboard. Keep the new plugin
-   disabled. Create a **dedicated** virtual companion in openHop with its own
+2. Install the local wheel from openHop's Plugins dashboard. Keep the new
+   plugin disabled. Catalogue installations auto-enable in this openHop
+   revision; do not publish a catalogue entry before onboarding is qualified. Create a **dedicated** virtual companion in openHop with its own
    identity, channel configuration and private TCP listener. No connectivity
    probes or second clients against a companion already in use.
 3. As the repeater service account, create the private YAML at

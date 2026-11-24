@@ -25,3 +25,9 @@
 launcher smoke test using an explicitly identified MEDRE stand-in. It verifies
 entrypoint execution, PID retention, the launch lock and SIGTERM delivery; it
 does not install or qualify MEDRE or its SDK dependencies.
+
+`python scripts/verify_status_contract.py --core PATH --repeater PATH --ha PATH
+--wheel PATH` exercises the real source writer, openHop manifest/default reader
+and runtime-file projection, and HA allowlist parser with cached app facts
+doubled. It checks wrong-PID and stale-record rejection without a live radio or
+Home Assistant instance.
