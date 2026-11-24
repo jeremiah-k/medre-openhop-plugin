@@ -1,0 +1,35 @@
+# Example only. Provision a dedicated virtual companion and test channels.
+# The launcher never copies or enables this file automatically.
+runtime:
+  name: openhop-bridge
+storage:
+  backend: sqlite
+adapters:
+  meshcore:
+    openhop:
+      enabled: true
+      adapter_kind: real
+      connection_type: tcp
+      host: 127.0.0.1
+      port: 5001
+      origin_label: MeshCore
+  meshtastic:
+    localmesh:
+      enabled: true
+      adapter_kind: real
+      connection_type: tcp
+      host: 192.0.2.1  # Replace with the actual private radio endpoint.
+      port: 4403
+      origin_label: Meshtastic
+routes:
+  test_bridge:
+    source_adapters: [openhop]
+    dest_adapters: [localmesh]
+    directionality: source_to_dest
+    enabled: false  # Explicit operator decision required before forwarding.
+    source_channel: "1"
+    dest_channel: "1"
+    policy:
+      allowed_event_types:
+        - message.created
+        - message.text

@@ -1,0 +1,29 @@
+[project]
+name = "medre-openhop-plugin"
+version = "0.1.0"
+description = "Managed MEDRE deployment for openHop Repeater"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+dependencies = [
+  "medre==0.2.3",
+  "medre-adapter-meshcore==0.2.0",
+  "medre-adapter-meshtastic==0.2.1",
+]
+
+[project.scripts]
+medre-openhop = "medre_openhop_plugin.launcher:main"
+
+[build-system]
+requires = ["setuptools==84.2.1"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.data-files]
+"share/openhop/plugins/medre.bridge" = ["openhop-plugin.json", "config.default.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "id": "medre.bridge",
+  "name": "MEDRE Bridge",
+  "version": "0.1.0",
+  "description": "Cross-network message routing through MEDRE",
+  "runtime": {
+    "type": "python",
+    "entrypoint": "medre-openhop"
+  },
+  "config": {
+    "defaults": {
+      "live_status": false
+    }
+  }
+}
