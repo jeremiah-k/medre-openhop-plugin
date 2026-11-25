@@ -76,3 +76,8 @@ code running under the repeater account, not a security sandbox.
 `PYTHONPATH=src python -m pytest -q` executes launcher tests without a radio.
 Build/verify/install the wheel, qualify actual core and SDK versions, then run
 lab campaigns before publishing a catalogue entry. See `docs/qualification.md`.
+
+The existing `data/medre` directory must remain private (mode 0700). Enabling
+`live_status` requires the installed MEDRE CLI to advertise `--status-file`;
+the launcher checks this once before exec. The pinned released core does not
+acquire that optional feature until the corresponding core release is qualified.

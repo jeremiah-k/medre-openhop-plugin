@@ -118,3 +118,21 @@ def test_failed_new_configuration_retires_previous_heartbeat(data):
     with pytest.raises(launcher.LaunchError, match="Provision"):
         launcher._prepare(data, {})
     assert not status.exists()
+
+
+def test_existing_medre_home_must_remain_private(data):
+    (data / "medre").chmod(0o755)
+    with pytest.raises(launcher.LaunchError, match="chmod 700"):
+        launcher._prepare(data, {})
+
+
+def test_optional_status_requires_installed_cli_capability(data, monkeypatch):
+    from types import SimpleNamespace
+
+    (data / "config.json").write_text('{"live_status": true}')
+    args, env = launcher._prepare(data, {})
+    monkeypatch.setattr(launcher.subprocess, "run", lambda *a, **k: SimpleNamespace(returncode=0, stdout=b"old help"))
+    with pytest.raises(launcher.LaunchError, match="lacks runtime status support"):
+        launcher._check_status_support(args, env)
+    monkeypatch.setattr(launcher.subprocess, "run", lambda *a, **k: SimpleNamespace(returncode=0, stdout=b"--status-file PATH"))
+    launcher._check_status_support(args, env)

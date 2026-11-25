@@ -6,6 +6,7 @@ import fcntl
 import json
 import os
 import stat
+import subprocess
 import sys
 from pathlib import Path
 from typing import Any, Mapping
@@ -91,6 +92,8 @@ def _prepare(data: Path, environ: Mapping[str, str]) -> tuple[list[str], dict[st
     home.mkdir(mode=0o700, exist_ok=True)
     if not home.is_dir():
         raise LaunchError("MEDRE home must be a directory")
+    if home.stat().st_mode & 0o077:
+        raise LaunchError("MEDRE home must be private (use chmod 700)")
     config = home / "config.yaml"
     if config.is_symlink() or not config.is_file():
         raise LaunchError("Provision the private bridge YAML at data/medre/config.yaml first")
@@ -106,6 +109,21 @@ def _prepare(data: Path, environ: Mapping[str, str]) -> tuple[list[str], dict[st
     return args, env
 
 
+def _check_status_support(args: list[str], env: dict[str, str]) -> None:
+    """Optional monitoring requires an installed core that exposes its CLI flag."""
+    if "--status-file" not in args:
+        return
+    try:
+        result = subprocess.run(
+            [sys.executable, "-I", "-m", "medre", "run", "--help"],
+            env=env, capture_output=True, timeout=10, check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise LaunchError("Could not verify installed MEDRE status support") from exc
+    if result.returncode or b"--status-file" not in result.stdout:
+        raise LaunchError("Installed MEDRE lacks runtime status support; disable live_status or install a qualified core")
+
+
 def main() -> int:
     """Replace the launcher with MEDRE, preserving PID, process group and signals."""
     os.umask(0o077)
@@ -114,6 +132,7 @@ def main() -> int:
         data = _plugin_data(os.environ)
         fd = _lock(data)
         args, env = _prepare(data, os.environ)
+        _check_status_support(args, env)
         os.execve(sys.executable, args, env)
     except LaunchError as exc:
         print(f"MEDRE plugin configuration: {exc}", file=sys.stderr)
