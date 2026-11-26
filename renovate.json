@@ -1,0 +1,52 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:best-practices"],
+  "enabledManagers": ["pep621", "github-actions", "custom.regex"],
+  "timezone": "America/Chicago",
+  "dependencyDashboard": {
+    "enabled": true
+  },
+  "automerge": false,
+  "packageRules": [
+    {
+      "description": "Keep Python support and deliberate CI minors under project review",
+      "matchDepTypes": ["requires-python", "uses-with"],
+      "matchPackageNames": ["python"],
+      "enabled": false
+    },
+    {
+      "description": "Trunk tool pins are refreshed by deliberate trunk upgrade rounds, not tracked as dependencies",
+      "matchFileNames": [".trunk/trunk.yaml"],
+      "enabled": false
+    },
+    {
+      "description": "Review CLI releases from the launcher manifest without a release timestamp",
+      "matchDatasources": ["custom.trunk-cli"],
+      "minimumReleaseAge": "0 days",
+      "automerge": false
+    },
+    {
+      "description": "Renovate's own tool pin is refreshed with deliberate Trunk toolchain upgrades, not tracked as a dependency",
+      "matchDepNames": ["renovate"],
+      "enabled": false
+    }
+  ],
+  "customDatasources": {
+    "trunk-cli": {
+      "defaultRegistryUrlTemplate": "https://trunk.io/releases/latest",
+      "format": "yaml",
+      "transformTemplates": ["{\"releases\":[{\"version\": $string(version)}]}"]
+    }
+  },
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Track Trunk CLI, plugins and linters from their declared upstream package sources",
+      "managerFilePatterns": ["/^\\.trunk/trunk\\.yaml$/"],
+      "matchStrings": [
+        "(?:@|version:\\s+|ref:\\s+v?)(?<currentValue>[0-9][^\\s]*)\\s+# renovate: datasource=(?<datasource>[a-z.-]+) depName=(?<depName>[^\\s]+)"
+      ],
+      "extractVersionTemplate": "^v?(?<version>.*)$"
+    }
+  ]
+}
