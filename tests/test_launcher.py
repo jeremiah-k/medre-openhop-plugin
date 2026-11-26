@@ -21,22 +21,39 @@ def data(tmp_path: Path) -> Path:
 
 def test_launch_uses_only_plugin_environment_and_fixed_config(data):
     args, env = launcher._prepare(
-        data, {"MEDRE_CONFIG": "wrong", "MEDRE_HOME": "wrong", "MEDRE_ADAPTER__X": "SECRET", "PATH": "/bin"}
+        data,
+        {
+            "MEDRE_CONFIG": "wrong",
+            "MEDRE_HOME": "wrong",
+            "MEDRE_ADAPTER__X": "SECRET",
+            "PATH": "/bin",
+        },
     )
-    assert args[1:] == ["-I", "-m", "medre", "run", "--config", str(data / "medre/config.yaml")]
+    assert args[1:] == [
+        "-I",
+        "-m",
+        "medre",
+        "run",
+        "--config",
+        str(data / "medre/config.yaml"),
+    ]
     assert env == {"PATH": "/bin", "MEDRE_HOME": str(data / "medre")}
 
 
 def test_optional_status_retires_stale_owned_observation(data):
     (data / "config.json").write_text('{"live_status": true}')
     status = data / "runtime.json"
-    status.write_text(json.dumps({"schema": launcher.STATUS_SCHEMA, "phase": "running"}))
+    status.write_text(
+        json.dumps({"schema": launcher.STATUS_SCHEMA, "phase": "running"})
+    )
     args, _ = launcher._prepare(data, {})
     assert args[-2:] == ["--status-file", str(status)]
     assert not status.exists()
 
 
-@pytest.mark.parametrize("settings", ["[]", "{", '{"live_status": 1}', '{"config_file":"/etc/passwd"}'])
+@pytest.mark.parametrize(
+    "settings", ["[]", "{", '{"live_status": 1}', '{"config_file":"/etc/passwd"}']
+)
 def test_invalid_settings_fail_closed(data, settings):
     (data / "config.json").write_text(settings)
     with pytest.raises(launcher.LaunchError):
@@ -83,7 +100,12 @@ def test_duplicate_launcher_is_rejected_and_lock_survives_exec(data):
 def test_requires_manager_environment(data):
     with pytest.raises(launcher.LaunchError):
         launcher._plugin_data({})
-    assert launcher._plugin_data({"OPENHOP_PLUGIN_ID": launcher.PLUGIN_ID, "OPENHOP_PLUGIN_DATA": str(data)}) == data
+    assert (
+        launcher._plugin_data(
+            {"OPENHOP_PLUGIN_ID": launcher.PLUGIN_ID, "OPENHOP_PLUGIN_DATA": str(data)}
+        )
+        == data
+    )
 
 
 def test_main_execs_without_child_process(data, monkeypatch):
@@ -100,6 +122,7 @@ def test_main_execs_without_child_process(data, monkeypatch):
 
     old_umask = os.umask(0o077)
     try:
+        monkeypatch.setattr(launcher, "_ensure_adapter_closure", lambda _env: None)
         monkeypatch.setattr(os, "execve", fake_exec)
         with pytest.raises(ExecCalled):
             launcher.main()
@@ -113,7 +136,9 @@ def test_main_execs_without_child_process(data, monkeypatch):
 
 def test_failed_new_configuration_retires_previous_heartbeat(data):
     status = data / "runtime.json"
-    status.write_text(json.dumps({"schema": launcher.STATUS_SCHEMA, "phase": "running"}))
+    status.write_text(
+        json.dumps({"schema": launcher.STATUS_SCHEMA, "phase": "running"})
+    )
     (data / "medre/config.yaml").unlink()
     with pytest.raises(launcher.LaunchError, match="Provision"):
         launcher._prepare(data, {})
@@ -131,8 +156,31 @@ def test_optional_status_requires_installed_cli_capability(data, monkeypatch):
 
     (data / "config.json").write_text('{"live_status": true}')
     args, env = launcher._prepare(data, {})
-    monkeypatch.setattr(launcher.subprocess, "run", lambda *a, **k: SimpleNamespace(returncode=0, stdout=b"old help"))
+    monkeypatch.setattr(
+        launcher.subprocess,
+        "run",
+        lambda *a, **k: SimpleNamespace(returncode=0, stdout=b"old help"),
+    )
     with pytest.raises(launcher.LaunchError, match="lacks runtime status support"):
         launcher._check_status_support(args, env)
-    monkeypatch.setattr(launcher.subprocess, "run", lambda *a, **k: SimpleNamespace(returncode=0, stdout=b"--status-file PATH"))
+    monkeypatch.setattr(
+        launcher.subprocess,
+        "run",
+        lambda *a, **k: SimpleNamespace(returncode=0, stdout=b"--status-file PATH"),
+    )
     launcher._check_status_support(args, env)
+
+
+def test_unsupported_status_does_not_mutate_venv(data, monkeypatch):
+    (data / "config.json").write_text('{"live_status": true}')
+    monkeypatch.setenv("OPENHOP_PLUGIN_ID", launcher.PLUGIN_ID)
+    monkeypatch.setenv("OPENHOP_PLUGIN_DATA", str(data))
+
+    def unsupported(*args):
+        raise launcher.LaunchError("unsupported status")
+
+    monkeypatch.setattr(launcher, "_check_status_support", unsupported)
+    monkeypatch.setattr(
+        launcher, "_ensure_adapter_closure", lambda _: pytest.fail("repair ran")
+    )
+    assert launcher.main() == 2

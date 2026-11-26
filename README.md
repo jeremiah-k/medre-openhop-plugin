@@ -51,6 +51,30 @@ or credentials leaking into this one. Python isolated mode excludes inherited
 ownership. The launch lock protects this wrapper, not arbitrary standalone
 MEDRE invocations; do not run another bridge against the same identity or state.
 
+Because MEDRE runs isolated, the plugin venv must satisfy its own dependency
+closure. It can end up incomplete without any error at install time: when the
+surrounding manager environment exports another Python environment through
+`PYTHONPATH` — the Home Assistant add-on wrapper exports the repeater's user
+site-packages this way — pip treats those copies as satisfying the plugin
+wheel's requirements and skips installing them into the venv. MEDRE's isolated
+interpreter never sees those copies, so the MeshCore adapter then reports its
+SDK as missing. The launcher therefore verifies, before every start and in the
+same isolated mode MEDRE will run under, that the dependency closure reachable
+from the plugin, core and every installed MEDRE adapter is satisfied by the
+plugin venv itself, including requested extras. Missing mandatory roots,
+invalid metadata, direct-reference requirements and incompatible installed
+versions fail closed. A repair installs only absent index dependencies using
+`--no-deps` and binary wheels, then rechecks the closure in bounded rounds.
+It never reinstalls an existing distribution, local or otherwise. An
+interrupted repair leaves a marker in the venv, and the next start treats it
+as a question rather than a refusal: a complete closure clears the marker and
+launches, an incomplete closure receives a bounded repair, and an
+inconsistent installation fails closed with the manual-repair message. A
+healthy venv uses local metadata and recorded-file size checks only. This is
+not a package integrity attestation or replacement for SDK qualification.
+The long-term fix belongs at installation time in the manager, not repeated
+runtime repair.
+
 `data/medre/` survives plugin upgrades. Back it up only under the project's
 supported stopped-state procedure. Uninstall with data deletion is destructive.
 
