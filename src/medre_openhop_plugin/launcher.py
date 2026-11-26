@@ -144,13 +144,15 @@ def _check_status_support(args: list[str], env: dict[str, str]) -> None:
         )
 
 
-def _probe_adapter_closure(extra_site: str = "") -> dict[str, Any]:
+def _probe_adapter_closure(
+    extra_site: str = "", *, timeout: float = 30
+) -> dict[str, Any]:
     """Inspect the isolated dependency closure; unavailable is never healthy."""
     try:
         result = subprocess.run(
             [sys.executable, "-I", str(_PROBE_PATH), extra_site],
             capture_output=True,
-            timeout=30,
+            timeout=timeout,
             check=False,
         )
         probe = json.loads(result.stdout)
@@ -201,6 +203,9 @@ def _install_requirements(
     """Install one round of missing requirements into this venv."""
     # Only the isolated probe's validated PEP 508 name and specifier forms
     # enter this argv: no direct references, options or shell interpretation.
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise LaunchError("Dependency repair exceeded its time budget")
     try:
         result = subprocess.run(
             [
@@ -217,7 +222,7 @@ def _install_requirements(
             ],
             env=_repair_environment(environ),
             capture_output=True,
-            timeout=max(0.1, deadline - time.monotonic()),
+            timeout=remaining,
             check=False,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
@@ -245,7 +250,10 @@ def _ensure_adapter_closure(environ: Mapping[str, str]) -> None:
     marked = marker.exists() or marker.is_symlink()
     deadline = time.monotonic() + _REPAIR_TIMEOUT_SECONDS
     for round_index in range(_MAX_REPAIR_ROUNDS + 1):
-        probe = _probe_adapter_closure()
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        probe = _probe_adapter_closure(timeout=min(30, remaining))
         if probe["blocked"]:
             raise LaunchError(
                 "Plugin venv requires manual repair: " + "; ".join(probe["blocked"])

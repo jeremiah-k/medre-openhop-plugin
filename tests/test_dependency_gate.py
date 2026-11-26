@@ -100,7 +100,7 @@ def test_unparseable_requirement_names_the_distribution_for_manual_repair(
     assert probe["blocked"] == ["invalid requirement metadata in fixturemesh"]
     assert probe["missing"] == []
     monkeypatch.setattr(launcher, "_repair_marker", lambda: tmp_path / "marker")
-    monkeypatch.setattr(launcher, "_probe_adapter_closure", lambda: probe)
+    monkeypatch.setattr(launcher, "_probe_adapter_closure", lambda **_: probe)
     monkeypatch.setattr(
         launcher.subprocess, "run", lambda *a, **k: pytest.fail("pip ran")
     )
@@ -140,7 +140,7 @@ def test_only_missing_packages_are_installed_without_dependencies(
     marker = tmp_path / "marker"
     monkeypatch.setattr(launcher, "_repair_marker", lambda: marker)
     probes = iter([broken, {"missing": [], "blocked": [], "problems": []}])
-    monkeypatch.setattr(launcher, "_probe_adapter_closure", lambda: next(probes))
+    monkeypatch.setattr(launcher, "_probe_adapter_closure", lambda **_: next(probes))
     calls = []
 
     def run(argv, **kwargs):
@@ -180,7 +180,7 @@ def test_marker_with_complete_closure_clears_and_launches(tmp_path, monkeypatch)
     monkeypatch.setattr(
         launcher,
         "_probe_adapter_closure",
-        lambda: {"missing": [], "blocked": [], "problems": []},
+        lambda **_: {"missing": [], "blocked": [], "problems": []},
     )
     monkeypatch.setattr(
         launcher.subprocess, "run", lambda *a, **k: pytest.fail("pip ran")
@@ -201,7 +201,7 @@ def test_incomplete_closure_after_marker_receives_one_bounded_repair(
             {"missing": [], "blocked": [], "problems": []},
         ]
     )
-    monkeypatch.setattr(launcher, "_probe_adapter_closure", lambda: next(probes))
+    monkeypatch.setattr(launcher, "_probe_adapter_closure", lambda **_: next(probes))
     calls = []
 
     def run(argv, **kwargs):
@@ -224,7 +224,7 @@ def test_marker_with_inconsistent_install_fails_closed_without_pip(
     monkeypatch.setattr(
         launcher,
         "_probe_adapter_closure",
-        lambda: {
+        lambda **_: {
             "missing": ["other"],
             "blocked": ["incomplete installed files for medre"],
             "problems": [],
@@ -244,7 +244,7 @@ def test_failing_repair_leaves_marker_for_the_next_start(tmp_path, monkeypatch):
     monkeypatch.setattr(
         launcher,
         "_probe_adapter_closure",
-        lambda: {"missing": ["fixturedep"], "blocked": [], "problems": []},
+        lambda **_: {"missing": ["fixturedep"], "blocked": [], "problems": []},
     )
     monkeypatch.setattr(
         launcher.subprocess, "run", lambda *a, **k: SimpleNamespace(returncode=1)
@@ -259,7 +259,7 @@ def test_blocked_closure_never_invokes_pip(tmp_path, monkeypatch):
     monkeypatch.setattr(
         launcher,
         "_probe_adapter_closure",
-        lambda: {
+        lambda **_: {
             "missing": ["other"],
             "blocked": ["incompatible local"],
             "problems": [],
@@ -270,3 +270,20 @@ def test_blocked_closure_never_invokes_pip(tmp_path, monkeypatch):
     )
     with pytest.raises(launcher.LaunchError, match="manual repair"):
         launcher._ensure_adapter_closure({})
+
+
+def test_repair_verification_respects_remaining_budget(tmp_path, monkeypatch):
+    marker = tmp_path / "marker"
+    monkeypatch.setattr(launcher, "_repair_marker", lambda: marker)
+    clock = iter([0.0, 0.0, 299.0, 299.0])
+    monkeypatch.setattr(launcher.time, "monotonic", lambda: next(clock))
+    timeouts = []
+
+    def probe(*, timeout):
+        timeouts.append(timeout)
+        return {"missing": [] if marker.exists() else ["fixturedep"], "blocked": []}
+
+    monkeypatch.setattr(launcher, "_probe_adapter_closure", probe)
+    monkeypatch.setattr(launcher, "_install_requirements", lambda *_: None)
+    launcher._ensure_adapter_closure({})
+    assert timeouts == [30, 1]
