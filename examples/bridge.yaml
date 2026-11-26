@@ -18,7 +18,7 @@ adapters:
       enabled: true
       adapter_kind: real
       connection_type: tcp
-      host: 192.0.2.1  # Replace with the actual private radio endpoint.
+      host: 192.0.2.1 # Replace with the actual private radio endpoint.
       port: 4403
       origin_label: Meshtastic
 routes:
@@ -26,7 +26,7 @@ routes:
     source_adapters: [openhop]
     dest_adapters: [localmesh]
     directionality: source_to_dest
-    enabled: false  # Explicit operator decision required before forwarding.
+    enabled: false # Explicit operator decision required before forwarding.
     source_channel: "1"
     dest_channel: "1"
     policy:
