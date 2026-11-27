@@ -6,13 +6,21 @@ import fcntl
 import json
 import os
 import stat
+import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any, Mapping
 
 PLUGIN_ID = "medre.bridge"
 STATUS_SCHEMA = "medre.runtime-status.v1"
 _MAX_JSON = 16_384
+_REPAIR_TIMEOUT_SECONDS = 300
+
+# The probe runs under the same isolated interpreter as MEDRE. Keep it in
+# a separate module so the installer and tests can inspect its contract.
+_PROBE_PATH = Path(__file__).with_name("dependency_probe.py")
+_MAX_REPAIR_ROUNDS = 16
 
 
 class LaunchError(ValueError):
@@ -69,7 +77,9 @@ def _lock(data: Path) -> int:
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as exc:
-            raise LaunchError("Another managed MEDRE launch holds the plugin lock") from exc
+            raise LaunchError(
+                "Another managed MEDRE launch holds the plugin lock"
+            ) from exc
         os.set_inheritable(fd, True)
         return fd
     except BaseException:
@@ -77,7 +87,9 @@ def _lock(data: Path) -> int:
         raise
 
 
-def _prepare(data: Path, environ: Mapping[str, str]) -> tuple[list[str], dict[str, str]]:
+def _prepare(
+    data: Path, environ: Mapping[str, str]
+) -> tuple[list[str], dict[str, str]]:
     status = data / "runtime.json"
     if status.exists() or status.is_symlink():
         if _json_object(status).get("schema") != STATUS_SCHEMA:
@@ -91,11 +103,17 @@ def _prepare(data: Path, environ: Mapping[str, str]) -> tuple[list[str], dict[st
     home.mkdir(mode=0o700, exist_ok=True)
     if not home.is_dir():
         raise LaunchError("MEDRE home must be a directory")
+    if home.stat().st_mode & 0o077:
+        raise LaunchError("MEDRE home must be private (use chmod 700)")
     config = home / "config.yaml"
     if config.is_symlink() or not config.is_file():
-        raise LaunchError("Provision the private bridge YAML at data/medre/config.yaml first")
+        raise LaunchError(
+            "Provision the private bridge YAML at data/medre/config.yaml first"
+        )
     if config.stat().st_mode & 0o077:
-        raise LaunchError("Bridge YAML must not be group/world accessible (use chmod 600)")
+        raise LaunchError(
+            "Bridge YAML must not be group/world accessible (use chmod 600)"
+        )
     env = {key: value for key, value in environ.items() if not key.startswith("MEDRE_")}
     env["MEDRE_HOME"] = str(home)
     # -I excludes inherited PYTHONPATH/user site (notably the HA wrapper's
@@ -106,6 +124,160 @@ def _prepare(data: Path, environ: Mapping[str, str]) -> tuple[list[str], dict[st
     return args, env
 
 
+def _check_status_support(args: list[str], env: dict[str, str]) -> None:
+    """Optional monitoring requires an installed core that exposes its CLI flag."""
+    if "--status-file" not in args:
+        return
+    try:
+        result = subprocess.run(
+            [sys.executable, "-I", "-m", "medre", "run", "--help"],
+            env=env,
+            capture_output=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise LaunchError("Could not verify installed MEDRE status support") from exc
+    if result.returncode or b"--status-file" not in result.stdout:
+        raise LaunchError(
+            "Installed MEDRE lacks runtime status support; disable live_status or install a qualified core"
+        )
+
+
+def _probe_adapter_closure(
+    extra_site: str = "", *, timeout: float = 30
+) -> dict[str, Any]:
+    """Inspect the isolated dependency closure; unavailable is never healthy."""
+    try:
+        result = subprocess.run(
+            [sys.executable, "-I", str(_PROBE_PATH), extra_site],
+            capture_output=True,
+            timeout=timeout,
+            check=False,
+        )
+        probe = json.loads(result.stdout)
+    except (OSError, subprocess.TimeoutExpired, ValueError) as exc:
+        raise LaunchError("Could not inspect the isolated plugin venv") from exc
+    if (
+        result.returncode
+        or not isinstance(probe, dict)
+        or type(probe.get("problems")) is not list
+        or type(probe.get("missing")) is not list
+        or type(probe.get("blocked")) is not list
+    ):
+        raise LaunchError("Could not inspect the isolated plugin venv")
+    return probe
+
+
+def _repair_environment(environ: Mapping[str, str]) -> dict[str, str]:
+    """Build the pip environment for one repair installation round.
+
+    Preserve explicit package index and certificate settings. Disable pip
+    configuration files, which can redirect installation or re-enable
+    options such as forced reinstalls.
+    """
+    allowed_pip = {
+        "PIP_INDEX_URL",
+        "PIP_EXTRA_INDEX_URL",
+        "PIP_CERT",
+        "PIP_CLIENT_CERT",
+    }
+    repair_env = {
+        key: value
+        for key, value in environ.items()
+        if not key.startswith(("PYTHON", "MEDRE_", "PIP_")) or key in allowed_pip
+    }
+    repair_env["PIP_CONFIG_FILE"] = os.devnull
+    return repair_env
+
+
+def _repair_marker() -> Path:
+    return Path(sys.prefix) / ".medre-dependency-repair-incomplete"
+
+
+def _install_requirements(
+    requirements: list[str], environ: Mapping[str, str], deadline: float
+) -> None:
+    """Install one round of missing requirements into this venv."""
+    # Only the isolated probe's validated PEP 508 name and specifier forms
+    # enter this argv: no direct references, options or shell interpretation.
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise LaunchError("Dependency repair exceeded its time budget")
+    try:
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-I",
+                "-m",
+                "pip",
+                "install",
+                "--no-deps",
+                "--only-binary=:all:",
+                "--no-input",
+                "--",
+                *requirements,
+            ],
+            env=_repair_environment(environ),
+            capture_output=True,
+            timeout=remaining,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise LaunchError(
+            "Dependency repair did not finish; rebuild the plugin venv"
+        ) from exc
+    if result.returncode:
+        raise LaunchError(
+            f"Dependency repair failed (pip exit {result.returncode});"
+            " rebuild the plugin venv"
+        )
+
+
+def _ensure_adapter_closure(environ: Mapping[str, str]) -> None:
+    """Install only absent index dependencies; never replace installed artifacts.
+
+    The repair publishes its marker before the first pip round and clears it
+    only after the probe reports a complete closure. A start that finds the
+    marker re-verifies instead of refusing: a complete closure clears the
+    marker and launches, an incomplete closure receives a bounded repair
+    under the same budget, and an inconsistent installation fails closed
+    with the manual-repair message.
+    """
+    marker = _repair_marker()
+    marked = marker.exists() or marker.is_symlink()
+    deadline = time.monotonic() + _REPAIR_TIMEOUT_SECONDS
+    for round_index in range(_MAX_REPAIR_ROUNDS + 1):
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            break
+        probe = _probe_adapter_closure(timeout=min(30, remaining))
+        if probe["blocked"]:
+            raise LaunchError(
+                "Plugin venv requires manual repair: " + "; ".join(probe["blocked"])
+            )
+        missing = probe["missing"]
+        if not missing:
+            if marked:
+                marker.unlink(missing_ok=True)
+            return
+        if round_index == _MAX_REPAIR_ROUNDS or time.monotonic() >= deadline:
+            break
+        if not marked:
+            # Publish the repair intent before the first pip round so a kill
+            # mid-repair leaves it in place for the next start to re-verify.
+            with marker.open("x"):
+                pass
+            marked = True
+        print(
+            "MEDRE plugin configuration: installing missing venv dependencies: "
+            + ", ".join(missing),
+            file=sys.stderr,
+        )
+        _install_requirements(missing, environ, deadline)
+    raise LaunchError("Dependency repair did not converge; rebuild the plugin venv")
+
+
 def main() -> int:
     """Replace the launcher with MEDRE, preserving PID, process group and signals."""
     os.umask(0o077)
@@ -114,6 +286,8 @@ def main() -> int:
         data = _plugin_data(os.environ)
         fd = _lock(data)
         args, env = _prepare(data, os.environ)
+        _check_status_support(args, env)
+        _ensure_adapter_closure(os.environ)
         os.execve(sys.executable, args, env)
     except LaunchError as exc:
         print(f"MEDRE plugin configuration: {exc}", file=sys.stderr)

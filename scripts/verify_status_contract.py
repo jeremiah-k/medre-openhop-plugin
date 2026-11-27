@@ -5,6 +5,7 @@ Only cached runtime facts are doubled; this is not a running bridge or HA instan
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import os
 import runpy
@@ -16,7 +17,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 
-def verify(core: Path, repeater: Path, ha: Path, wheel: Path) -> None:
+async def verify(core: Path, repeater: Path, ha: Path, wheel: Path) -> None:
     sys.path.insert(0, str(repeater.resolve()))
     from repeater.plugins.manager import PluginManager
     from repeater.plugins.manifest import load_manifest_from_wheel
@@ -44,7 +45,7 @@ def verify(core: Path, repeater: Path, ha: Path, wheel: Path) -> None:
         path = storage.runtime_path(manifest.id)
         path.parent.mkdir(parents=True, exist_ok=True)
         writer = status_type(path)
-        writer.initialize()
+        await writer.initialize()
         assert parse(manager.get_runtime(manifest.id), expected_pid=os.getpid())[
             "phase"
         ] == "starting"
@@ -61,7 +62,7 @@ def verify(core: Path, repeater: Path, ha: Path, wheel: Path) -> None:
                 skipped=(SimpleNamespace(route_id="private-route"),)
             ),
         )
-        writer.publish("running")
+        await writer.publish("running")
         payload = manager.get_runtime(manifest.id)
         observation = parse(payload, expected_pid=os.getpid())
         assert observation["runtime_health"] == "degraded"
@@ -70,10 +71,16 @@ def verify(core: Path, repeater: Path, ha: Path, wheel: Path) -> None:
         assert "private" not in json.dumps(observation).lower()
         assert parse(payload, expected_pid=os.getpid() + 1) is None
         assert parse(payload, expected_pid=os.getpid(), now=time.time() + 31) is None
-        writer.publish("stopped")
+        await writer.publish("stopped")
         stopped = parse(manager.get_runtime(manifest.id), expected_pid=os.getpid())
         assert stopped["phase"] == "stopped"
         assert stopped["runtime_health"] is None
+        # Startup route counts are startup-derived facts: the stopped
+        # observation keeps them while the running-only fields return to null.
+        assert stopped["adapters_started"] is None
+        assert stopped["startup_routes_registered"] == 1
+        assert stopped["startup_routes_blocked"] == 1
+        writer.close()
     print("PASS exact source contract: wheel manifest/defaults, status writer, manager reader, HA parser, PID and staleness rejection")
 
 
@@ -81,4 +88,4 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("core", "repeater", "ha", "wheel"):
         parser.add_argument(f"--{name}", type=Path, required=True)
-    verify(**vars(parser.parse_args()))
+    asyncio.run(verify(**vars(parser.parse_args())))
