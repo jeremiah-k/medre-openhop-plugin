@@ -3,6 +3,7 @@
 import base64
 import hashlib
 import json
+import os
 from types import SimpleNamespace
 
 import pytest
@@ -169,7 +170,7 @@ def test_only_missing_packages_are_installed_without_dependencies(
     assert "PIP_TARGET" not in env and "PIP_FORCE_REINSTALL" not in env
     assert env["PATH"] == "/bin"
     assert env["PIP_INDEX_URL"] == "https://index.example/simple"
-    assert env["PIP_CONFIG_FILE"] == "/ops/pip.ini"
+    assert env["PIP_CONFIG_FILE"] == os.devnull
     assert not marker.exists()
 
 

@@ -65,11 +65,12 @@ plugin venv itself, including requested extras. Missing mandatory roots,
 invalid metadata, direct-reference requirements and incompatible installed
 versions fail closed. A repair installs only absent index dependencies using
 `--no-deps` and binary wheels, then rechecks the closure in bounded rounds.
-It never reinstalls an existing distribution, local or otherwise. An
-interrupted repair leaves a marker in the venv, and the next start treats it
-as a question rather than a refusal: a complete closure clears the marker and
-launches, an incomplete closure receives a bounded repair, and an
-inconsistent installation fails closed with the manual-repair message. A
+It preserves explicit pip index and certificate environment settings and
+ignores pip configuration files, which can change the installation target
+or force reinstalls. An interrupted repair leaves a marker in the venv.
+The next start verifies the closure and clears the marker if it is complete.
+An incomplete closure receives a bounded repair, and an inconsistent
+installation fails closed with the manual-repair message. A
 healthy venv uses local metadata and recorded-file size checks only. This is
 not a package integrity attestation or replacement for SDK qualification.
 The long-term fix belongs at installation time in the manager, not repeated

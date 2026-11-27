@@ -172,25 +172,23 @@ def _probe_adapter_closure(
 def _repair_environment(environ: Mapping[str, str]) -> dict[str, str]:
     """Build the pip environment for one repair installation round.
 
-    The plugin manager's installer runs pip with its own inherited
-    environment and never disables pip's configuration files, so the repair
-    resolves from the same index configuration: the index, certificate and
-    configuration-file variables survive the scrub. Installation-target,
-    resolver and force-reinstall overrides and the interpreter paths that
-    leak foreign site-packages stay removed.
+    Preserve explicit package index and certificate settings. Disable pip
+    configuration files, which can redirect installation or re-enable
+    options such as forced reinstalls.
     """
     allowed_pip = {
         "PIP_INDEX_URL",
         "PIP_EXTRA_INDEX_URL",
         "PIP_CERT",
         "PIP_CLIENT_CERT",
-        "PIP_CONFIG_FILE",
     }
-    return {
+    repair_env = {
         key: value
         for key, value in environ.items()
         if not key.startswith(("PYTHON", "MEDRE_", "PIP_")) or key in allowed_pip
     }
+    repair_env["PIP_CONFIG_FILE"] = os.devnull
+    return repair_env
 
 
 def _repair_marker() -> Path:
